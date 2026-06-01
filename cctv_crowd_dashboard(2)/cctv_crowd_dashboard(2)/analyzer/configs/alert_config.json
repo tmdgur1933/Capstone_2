@@ -1,0 +1,7 @@
+{
+  "cell_width": 80,
+  "cell_height": 80,
+  "warning_threshold": 5,
+  "danger_threshold": 8,
+  "persist_frames": 5
+}
