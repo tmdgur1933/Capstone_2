@@ -14,7 +14,6 @@ class Detection:
     confidence: float
     xyxy: BBox
     center: Point
-    bottom_center: Point
 
 
 @dataclass
@@ -49,7 +48,7 @@ class HeadDetector:
             cy = int((y1 + y2) / 2)
             cls_id = int(box.cls[0].detach().cpu().item()) if box.cls is not None else 0
             label = self.model.names.get(cls_id, "head") if hasattr(self.model, "names") else "head"
-            detections.append(Detection(str(label), confidence, (x1, y1, x2, y2), (cx, cy), (cx, int(y2))))
+            detections.append(Detection(str(label), confidence, (x1, y1, x2, y2), (cx, cy)))
         return detections
 
 

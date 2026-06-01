@@ -9,13 +9,6 @@ class AlertSummary:
     danger_cell_count: int
     max_cell_count: int
 
-    def to_dict(self):
-        return {
-            "overall_status": self.overall_status,
-            "warning_cell_count": self.warning_cell_count,
-            "danger_cell_count": self.danger_cell_count,
-            "max_cell_count": self.max_cell_count,
-        }
 
 
 class AlertEngine:

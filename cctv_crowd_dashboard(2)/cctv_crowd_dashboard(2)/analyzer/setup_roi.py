@@ -98,7 +98,7 @@ class PolygonROIEditor:
             "Left click: add polygon point",
             "Right click: undo last point",
             "R: reset",
-            "Enter: save ROI and continue to Gate setup",
+            "Enter: save ROI",
             "ESC: cancel",
             "Points must follow boundary clockwise or counter-clockwise",
         ]

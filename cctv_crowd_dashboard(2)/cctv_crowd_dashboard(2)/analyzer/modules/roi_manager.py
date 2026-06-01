@@ -65,10 +65,6 @@ class ROIManager:
         return self.polygon is None
 
     def contains_point(self, point: Sequence[int]) -> bool:
-        """
-        point가 ROI 내부에 있는지 판단.
-        polygon이 없으면 전체 화면이므로 True.
-        """
         if self.is_full_frame:
             return True
 
@@ -78,10 +74,6 @@ class ROIManager:
         return result >= 0
 
     def filter_detections(self, detections, point_attr: str):
-        """
-        detections 중 ROI 안에 들어온 것만 반환.
-        
-        """
         filtered = []
 
         for det in detections:
@@ -92,9 +84,6 @@ class ROIManager:
         return filtered
 
     def draw(self, frame):
-        """
-        영상 위에 ROI를 그린다.
-        """
         if self.is_full_frame:
             cv2.putText(
                 frame,

@@ -21,33 +21,14 @@ class GridCell:
         x1, y1, x2, y2 = self.bbox
         return x1 <= x < x2 and y1 <= y < y2
 
-    def to_dict(self):
-        return {
-            "cell_id": self.cell_id,
-            "row": self.row,
-            "col": self.col,
-            "bbox": list(self.bbox),
-            "count": self.count,
-            "status": self.status,
-        }
-
 
 class GridManager:
-    """
-    ROI 내부를 grid cell로 나누고 cell별 사람 수를 계산한다.
-    """
-
     def __init__(self, cell_width: int = 80, cell_height: int = 80):
         self.cell_width = cell_width
         self.cell_height = cell_height
         self.cells: List[GridCell] = []
 
     def build_cells(self, frame_width: int, frame_height: int, roi_manager):
-        """
-        ROI 내부에 포함되는 grid cell만 active cell로 생성한다.
-        ROI가 full frame이면 전체 화면을 grid로 나눈다.
-        """
-
         self.cells = []
 
         if roi_manager.is_full_frame:
@@ -103,10 +84,6 @@ class GridManager:
             cell.status = "NORMAL"
 
     def count_points(self, points: List[Point]):
-        """
-        사람 대표 좌표들이 어느 grid cell에 들어가는지 계산한다.
-        """
-
         self.reset_counts()
 
         for point in points:
@@ -115,17 +92,7 @@ class GridManager:
                     cell.count += 1
                     break
 
-    def get_count_map(self) -> Dict[str, int]:
-        return {cell.cell_id: cell.count for cell in self.cells}
-
-    def to_list(self):
-        return [cell.to_dict() for cell in self.cells]
-
     def draw(self, frame):
-        """
-        grid cell과 count/status를 화면에 그림.
-        """
-
         for cell in self.cells:
             x1, y1, x2, y2 = cell.bbox
 

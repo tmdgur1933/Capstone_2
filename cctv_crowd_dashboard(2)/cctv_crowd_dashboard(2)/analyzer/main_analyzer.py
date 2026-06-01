@@ -133,37 +133,36 @@ class ROIFlowCounter:
         }
 
 
-def draw_detection(frame, detection, color):
-    x1, y1, x2, y2 = detection.xyxy
-    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
-
-
 def draw_track(frame, person, color=(255, 0, 0)):
     x1, y1, x2, y2 = person.bbox
     cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
     cv2.putText(frame, f"ID:{person.track_id}", (x1, max(15, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
 
 
-def make_minimal_payload(*, in_count: int, out_count: int, roi_person_count: int):
-    return {"in_count": in_count, "out_count": out_count, "roi_person_count": roi_person_count}
-
-
-def draw_status_panel(frame, frame_index, roi_person_count, flow_summary):
-    net_flow = flow_summary.get("net_flow", flow_summary["total_in"] - flow_summary["total_out"])
-    recent_diff = flow_summary.get("flow_imbalance", 0)
-    flow_status = flow_summary.get("flow_status", "NORMAL")
+def draw_status_panel(frame, frame_index, roi_person_count, flow_summary, alert_summary):
+    net_flow = flow_summary["net_flow"]
+    recent_diff = flow_summary["flow_imbalance"]
+    flow_status = flow_summary["flow_status"]
     if flow_status == "DANGER":
         flow_color = (0, 0, 255)
     elif flow_status == "WARNING":
         flow_color = (0, 165, 255)
     else:
         flow_color = (0, 255, 0)
-    cv2.rectangle(frame, (12, 12), (790, 188), (0, 0, 0), -1)
-    cv2.rectangle(frame, (12, 12), (790, 188), (80, 80, 80), 1)
+    alert_status = alert_summary.overall_status
+    if alert_status == "DANGER":
+        alert_color = (0, 0, 255)
+    elif alert_status == "WARNING":
+        alert_color = (0, 165, 255)
+    else:
+        alert_color = (0, 255, 0)
+    cv2.rectangle(frame, (12, 12), (790, 224), (0, 0, 0), -1)
+    cv2.rectangle(frame, (12, 12), (790, 224), (80, 80, 80), 1)
     cv2.putText(frame, f"Frame: {frame_index}", (25, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2, cv2.LINE_AA)
     cv2.putText(frame, f"ROI Persons: {roi_person_count}", (25, 78), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2, cv2.LINE_AA)
     cv2.putText(frame, f"IN: {flow_summary['total_in']} | OUT: {flow_summary['total_out']} | STAY: {flow_summary['stay_count']}", (25, 114), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2, cv2.LINE_AA)
     cv2.putText(frame, f"DIFF: {net_flow:+d} | RECENT DIFF: {recent_diff:+d} | FLOW: {flow_status}", (25, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.75, flow_color, 2, cv2.LINE_AA)
+    cv2.putText(frame, f"GRID ALERT: {alert_status} | WARNING: {alert_summary.warning_cell_count} | DANGER: {alert_summary.danger_cell_count}", (25, 186), cv2.FONT_HERSHEY_SIMPLEX, 0.75, alert_color, 2, cv2.LINE_AA)
 
 
 def read_first_frame(video_path: Path):
@@ -185,7 +184,6 @@ def run_interactive_roi_setup_if_needed(args, video_path: Path, roi_path: Path):
         return
     print("[INFO] Interactive ROI setup mode enabled.")
     print("[INFO] First frame will open for ROI setup.")
-    print("[INFO] Gate setup is removed. IN/OUT is calculated by ROI boundary crossing.")
     first_frame = read_first_frame(video_path)
     run_roi_editor_on_frame(frame=first_frame, video_path=video_path, output_path=roi_path, camera_id=args.camera_id, roi_name=f"{video_path.stem}_roi", max_display_width=args.max_display_width)
 
@@ -205,7 +203,7 @@ def main():
     parser.add_argument("--body-conf", type=float, default=0.25)
     parser.add_argument("--imgsz", type=int, default=960)
     parser.add_argument("--max-frames", type=int, default=0)
-    parser.add_argument("--show", action="store_true", default=True)
+    parser.add_argument("--show", action="store_true", default=False)
     parser.add_argument("--device", default="auto", help="auto, 0 for GPU, cpu for CPU.")
     parser.add_argument("--tracker-config", default=None)
     parser.add_argument("--flow-recent-window", type=int, default=150)
@@ -243,11 +241,11 @@ def main():
     print(f"[INFO] Alert config: {alert_config}")
     print("[INFO] Loading models...")
     print("[INFO] Body tracking: ByteTrack")
-    print("[INFO] Flow counting: ROI boundary crossing. Gate is not used.")
+    print("[INFO] Flow counting: ROI boundary crossing")
 
     body_tracker = ByteTrackPersonTracker(body_model_path=args.body_model, conf=args.body_conf, imgsz=args.imgsz, device=resolved_device, tracker_config=tracker_config)
     head_detector = HeadDetector(head_model_path=args.head_model, conf=args.head_conf, imgsz=args.imgsz, device=resolved_device)
-    flow_counter = ROIFlowCounter(cooldown_frames=args.cross_cooldown, recent_window_frames=args.flow_recent_window, warning_threshold=args.flow_warning_threshold, danger_threshold=args.flow-danger_threshold if False else args.flow_danger_threshold)
+    flow_counter = ROIFlowCounter(cooldown_frames=args.cross_cooldown, recent_window_frames=args.flow_recent_window, warning_threshold=args.flow_warning_threshold, danger_threshold=args.flow_danger_threshold)
 
     backend_client = None
     if args.send_backend:
@@ -289,21 +287,22 @@ def main():
 
             person_points = [person.point for person in roi_tracks]
             grid_manager.count_points(person_points)
-            alert_engine.update_cells(grid_manager.cells)
-            roi_manager.draw(frame)
-            grid_manager.draw(frame)
-            for person in roi_tracks:
-                draw_track(frame, person, color=(255, 0, 0))
-            for head in roi_heads:
-                draw_detection(frame, head, color=(0, 255, 0))
+            alert_summary = alert_engine.update_cells(grid_manager.cells)
 
-            minimal_payload = make_minimal_payload(in_count=flow_summary["total_in"], out_count=flow_summary["total_out"], roi_person_count=roi_person_count)
+            minimal_payload = {"in_count": flow_summary["total_in"], "out_count": flow_summary["total_out"], "roi_person_count": roi_person_count}
             log_file.write(json.dumps(minimal_payload, ensure_ascii=False) + "\n")
             if backend_client is not None and frame_index % args.send_every_n_frames == 0:
                 backend_client.send_snapshot(minimal_payload)
-            draw_status_panel(frame=frame, frame_index=frame_index, roi_person_count=roi_person_count, flow_summary=flow_summary)
 
             if args.show:
+                roi_manager.draw(frame)
+                grid_manager.draw(frame)
+                for person in roi_tracks:
+                    draw_track(frame, person, color=(255, 0, 0))
+                for head in roi_heads:
+                    x1, y1, x2, y2 = head.xyxy
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
+                draw_status_panel(frame=frame, frame_index=frame_index, roi_person_count=roi_person_count, flow_summary=flow_summary, alert_summary=alert_summary)
                 cv2.imshow("CCTV Crowd Analyzer - ByteTrack ROI Flow", frame)
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):
@@ -312,7 +311,7 @@ def main():
             if args.max_frames > 0 and frame_index >= args.max_frames:
                 break
             if frame_index % 30 == 0:
-                print(f"[INFO] frame={frame_index}, roi_persons={roi_person_count}, tracks={len(roi_tracks)}, heads={len(roi_heads)}, in={flow_summary['total_in']}, out={flow_summary['total_out']}, diff={flow_summary['net_flow']}, recent_diff={flow_summary['flow_imbalance']}, flow={flow_summary['flow_status']}")
+                print(f"[INFO] frame={frame_index}, roi_persons={roi_person_count}, tracks={len(roi_tracks)}, heads={len(roi_heads)}, in={flow_summary['total_in']}, out={flow_summary['total_out']}, diff={flow_summary['net_flow']}, recent_diff={flow_summary['flow_imbalance']}, flow={flow_summary['flow_status']}, alert={alert_summary.overall_status}")
 
     cap.release()
     if args.show:
@@ -322,7 +321,6 @@ def main():
     print(f"[DONE] Frames processed: {frame_index}")
     print(f"[DONE] Elapsed: {elapsed:.2f}s")
     print(f"[DONE] Summary JSONL log: {log_path}")
-    print("[DONE] Gate code is not used in this version.")
     print("[DONE] No preview video/frame image saved.")
 
 
