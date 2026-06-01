@@ -1,16 +1,13 @@
 import argparse
-import json
 import time
 from collections import deque
 from pathlib import Path
 
 import cv2
 
-from modules.alert_engine import AlertEngine
 from modules.backend_client import BackendClient
 from modules.bytetrack_tracker import ByteTrackPersonTracker, HeadDetector
 from modules.db_logger import DBLogger
-from modules.grid_manager import GridManager
 from modules.roi_manager import ROIManager
 from setup_roi import run_roi_editor_on_frame
 
@@ -42,24 +39,6 @@ def resolve_device(device_arg: str) -> str:
     except Exception:
         pass
     return "cpu"
-
-
-def load_alert_config(path: Path):
-    default_config = {
-        "cell_width": 80,
-        "cell_height": 80,
-        "warning_threshold": 5,
-        "danger_threshold": 8,
-        "persist_frames": 5,
-    }
-    if not path.exists():
-        print(f"[WARN] Alert config not found. Use default: {default_config}")
-        return default_config
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    config = default_config.copy()
-    config.update(data)
-    return config
 
 
 class ROIFlowCounter:
@@ -140,7 +119,7 @@ def draw_track(frame, person, color=(255, 0, 0)):
     cv2.putText(frame, f"ID:{person.track_id}", (x1, max(15, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
 
 
-def draw_status_panel(frame, frame_index, roi_person_count, flow_summary, alert_summary):
+def draw_status_panel(frame, frame_index, roi_person_count, flow_summary):
     net_flow = flow_summary["net_flow"]
     recent_diff = flow_summary["flow_imbalance"]
     flow_status = flow_summary["flow_status"]
@@ -150,20 +129,12 @@ def draw_status_panel(frame, frame_index, roi_person_count, flow_summary, alert_
         flow_color = (0, 165, 255)
     else:
         flow_color = (0, 255, 0)
-    alert_status = alert_summary.overall_status
-    if alert_status == "DANGER":
-        alert_color = (0, 0, 255)
-    elif alert_status == "WARNING":
-        alert_color = (0, 165, 255)
-    else:
-        alert_color = (0, 255, 0)
-    cv2.rectangle(frame, (12, 12), (790, 224), (0, 0, 0), -1)
-    cv2.rectangle(frame, (12, 12), (790, 224), (80, 80, 80), 1)
+    cv2.rectangle(frame, (12, 12), (790, 188), (0, 0, 0), -1)
+    cv2.rectangle(frame, (12, 12), (790, 188), (80, 80, 80), 1)
     cv2.putText(frame, f"Frame: {frame_index}", (25, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2, cv2.LINE_AA)
     cv2.putText(frame, f"ROI Persons: {roi_person_count}", (25, 78), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2, cv2.LINE_AA)
     cv2.putText(frame, f"IN: {flow_summary['total_in']} | OUT: {flow_summary['total_out']} | STAY: {flow_summary['stay_count']}", (25, 114), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2, cv2.LINE_AA)
     cv2.putText(frame, f"DIFF: {net_flow:+d} | RECENT DIFF: {recent_diff:+d} | FLOW: {flow_status}", (25, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.75, flow_color, 2, cv2.LINE_AA)
-    cv2.putText(frame, f"GRID ALERT: {alert_status} | WARNING: {alert_summary.warning_cell_count} | DANGER: {alert_summary.danger_cell_count}", (25, 186), cv2.FONT_HERSHEY_SIMPLEX, 0.75, alert_color, 2, cv2.LINE_AA)
 
 
 def read_first_frame(video_path: Path):
@@ -193,12 +164,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--head-model", default=str(PROJECT_ROOT / "models" / "ccrv_head_v5.pt"))
     parser.add_argument("--body-model", default=str(PROJECT_ROOT / "models" / "body_wider_labeling.pt"))
-    parser.add_argument("--video", default=str(PROJECT_ROOT / "data" / "E05_008.mp4"))
+    parser.add_argument("--video", default=str(PROJECT_ROOT / "data" / "test.mp4"))
     parser.add_argument("--camera-id", default="cam_001")
     parser.add_argument("--max-display-width", type=int, default=1280)
     parser.add_argument("--skip-interactive-setup", action="store_true", help="Reuse saved ROI config without opening setup window.")
     parser.add_argument("--roi", default=None)
-    parser.add_argument("--alert-config", default=str(PROJECT_ROOT / "analyzer" / "configs" / "alert_config.json"))
     parser.add_argument("--db", default=None)
     parser.add_argument("--head-conf", type=float, default=0.20)
     parser.add_argument("--body-conf", type=float, default=0.25)
@@ -221,7 +191,6 @@ def main():
     if not video_path.exists():
         raise FileNotFoundError(f"Video not found: {video_path}")
     roi_path = Path(args.roi) if args.roi else default_roi_path(video_path)
-    alert_config_path = Path(args.alert_config)
     db_path = Path(args.db) if args.db else default_db_path()
     tracker_config = args.tracker_config if args.tracker_config else default_tracker_config_path()
     resolved_device = resolve_device(args.device)
@@ -236,9 +205,6 @@ def main():
     roi_manager = ROIManager.from_json(str(roi_path))
     print(f"[INFO] ROI config: {roi_path}")
     print(f"[INFO] ROI: {roi_manager.to_dict()}")
-    print("[INFO] Loading alert config...")
-    alert_config = load_alert_config(alert_config_path)
-    print(f"[INFO] Alert config: {alert_config}")
     print("[INFO] Loading models...")
     print("[INFO] Body tracking: ByteTrack")
     print("[INFO] Flow counting: ROI boundary crossing")
@@ -255,12 +221,6 @@ def main():
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         raise RuntimeError(f"Failed to open video: {video_path}")
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    grid_manager = GridManager(cell_width=int(alert_config["cell_width"]), cell_height=int(alert_config["cell_height"]))
-    grid_manager.build_cells(frame_width=width, frame_height=height, roi_manager=roi_manager)
-    alert_engine = AlertEngine(warning_threshold=int(alert_config["warning_threshold"]), danger_threshold=int(alert_config["danger_threshold"]), persist_frames=int(alert_config["persist_frames"]))
 
     frame_index = 0
     start_time = time.time()
@@ -284,10 +244,6 @@ def main():
         roi_person_count = max(len(roi_tracks), len(roi_heads))
         flow_summary = flow_counter.get_summary(current_roi_person_count=roi_person_count)
 
-        person_points = [person.point for person in roi_tracks]
-        grid_manager.count_points(person_points)
-        alert_summary = alert_engine.update_cells(grid_manager.cells)
-
         db_logger.insert(frame_index=frame_index, in_count=flow_summary["total_in"], out_count=flow_summary["total_out"], roi_person_count=roi_person_count)
         minimal_payload = {"in_count": flow_summary["total_in"], "out_count": flow_summary["total_out"], "roi_person_count": roi_person_count}
         if backend_client is not None and frame_index % args.send_every_n_frames == 0:
@@ -295,22 +251,21 @@ def main():
 
         if args.show:
             roi_manager.draw(frame)
-            grid_manager.draw(frame)
             for person in roi_tracks:
                 draw_track(frame, person, color=(255, 0, 0))
             for head in roi_heads:
                 x1, y1, x2, y2 = head.xyxy
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
-            draw_status_panel(frame=frame, frame_index=frame_index, roi_person_count=roi_person_count, flow_summary=flow_summary, alert_summary=alert_summary)
+            draw_status_panel(frame=frame, frame_index=frame_index, roi_person_count=roi_person_count, flow_summary=flow_summary)
             cv2.imshow("CCTV Crowd Analyzer - ByteTrack ROI Flow", frame)
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord("q"):
-                print("[INFO] Stopped by user.")
+            cv2.waitKey(1)
+            if cv2.getWindowProperty("CCTV Crowd Analyzer - ByteTrack ROI Flow", cv2.WND_PROP_VISIBLE) < 1:
+                print("[INFO] Window closed by user.")
                 break
         if args.max_frames > 0 and frame_index >= args.max_frames:
             break
         if frame_index % 30 == 0:
-            print(f"[INFO] frame={frame_index}, roi_persons={roi_person_count}, tracks={len(roi_tracks)}, heads={len(roi_heads)}, in={flow_summary['total_in']}, out={flow_summary['total_out']}, diff={flow_summary['net_flow']}, recent_diff={flow_summary['flow_imbalance']}, flow={flow_summary['flow_status']}, alert={alert_summary.overall_status}")
+            print(f"[INFO] frame={frame_index}, roi_persons={roi_person_count}, tracks={len(roi_tracks)}, heads={len(roi_heads)}, in={flow_summary['total_in']}, out={flow_summary['total_out']}, diff={flow_summary['net_flow']}, recent_diff={flow_summary['flow_imbalance']}, flow={flow_summary['flow_status']}")
 
     db_logger.close()
     cap.release()

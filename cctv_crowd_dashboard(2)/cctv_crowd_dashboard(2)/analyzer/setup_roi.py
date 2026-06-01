@@ -221,7 +221,7 @@ def main():
 
     parser.add_argument(
         "--video",
-        default=str(PROJECT_ROOT / "data" / "E05_008.mp4"),
+        default=str(PROJECT_ROOT / "data" / "test.mp4"),
         help="Path to input video",
     )
     parser.add_argument(
